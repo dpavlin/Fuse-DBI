@@ -5,7 +5,7 @@ use warnings;
 
 use Test::Pod tests => 1;
 
-use jsFind;
+use Fuse::DBI;
 
-pod_file_ok($INC{"jsFind.pm"});
+pod_file_ok($INC{"Fuse::DBI"});
 
