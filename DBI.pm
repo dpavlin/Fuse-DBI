@@ -364,7 +364,8 @@ sub read_content {
 
 	$sth->{'read'}->execute($id) || die $sth->{'read'}->errstr;
 	$files{$file}{cont} = $sth->{'read'}->fetchrow_array;
-	$files{$file}{ctime} = time();
+	# I should modify ctime only if content in database changed
+	#$files{$file}{ctime} = time() unless ($files{$file}{ctime});
 	print "file '$file' content [",length($files{$file}{cont})," bytes] read in cache\n";
 }
 
@@ -410,6 +411,7 @@ sub clear_cont {
 	print "invalidate all cached content\n";
 	foreach my $f (keys %files) {
 		delete $files{$f}{cont};
+		delete $files{$f}{ctime};
 	}
 	print "begin new transaction\n";
 	#$dbh->begin_work || die $dbh->errstr;
