@@ -48,7 +48,7 @@ my $sql_filenames = qq{
 		name as id,
 		name as filename,
 		length(data) as size,
-		0 as writable
+		1 as writable
 	from files
 };
 
