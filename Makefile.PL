@@ -10,6 +10,7 @@ WriteMakefile(
     	'Fuse' => 0,
 	'DBI' => 0,
 	'Carp' => 0,
+	'File::Find' => 0,
     }, # e.g., Module::Name => 1.1
     ($] >= 5.005 ?     ## Add these new keywords supported since 5.005
       (ABSTRACT_FROM  => 'DBI.pm', # retrieve abstract from module

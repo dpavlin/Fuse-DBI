@@ -4,11 +4,12 @@ use strict;
 use warnings;
 
 use Test::More;
+use File::Find;
 use blib;
 
 eval "use DBD::SQLite";
 plan skip_all => "DBD::SQLite required for testing" if $@;
-plan tests => 15;
+plan tests => 36;
 
 use_ok('DBI');
 use_ok('Fuse::DBI');
@@ -38,9 +39,12 @@ ok(my $sth = $dbh->prepare(qq{
 	insert into files (name,data) values (?,?)
 }), "prepare");
 
-foreach my $file (qw(file dir/file dir/subdir/file)) {
-	my $data = "this is test data\n" x length($file);
-	ok($sth->execute($file,$data), "insert $file");
+my @files = qw(file dir/file dir/subdir/file);
+my %file_data;
+
+foreach my $file (@files) {
+	$file_data{$file} = ("this is test data on ".localtime()."\n") x length($file);
+	ok($sth->execute($file,$file_data{$file}), "insert $file");
 }
 
 ok($dbh->disconnect, "disconnect after insert");
@@ -79,8 +83,33 @@ my $mnt = Fuse::DBI->mount({
 
 ok($mnt, "mount");
 
-diag "press enter to continue";
-my $foo = <STDIN>;
+sub test_file {
+	my $f = $File::Find::name;
+
+	ok($f, "file $f");
+
+	return unless (-f $f);
+
+	ok(open(F, $f), "open");
+	my $tmp = '';
+	while(<F>) {
+		$tmp .= $_;
+	}
+	ok(close(F), "close");
+
+	# strip mountpoint
+	$f =~ s#^\Q$mount\E/##;
+
+	ok($file_data{$f}, "$f exists");
+
+	cmp_ok(length($file_data{$f}), '==', length($tmp), "size");
+	cmp_ok($file_data{$f}, 'eq', $tmp, "content");
+}
+
+# small delay so that filesystem could mount
+sleep(1);
+
+find({ wanted => \&test_file, no_chdir => 1 }, $mount);
 
 ok($mnt->umount,"umount");
 

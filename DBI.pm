@@ -13,7 +13,7 @@ use Carp;
 use Data::Dumper;
 
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 =head1 NAME
 
@@ -148,6 +148,7 @@ sub mount {
 
 	my $pid;
 	if ($arg->{'fork'}) {
+		$self->{'mounted'} = 1;
 		$pid = fork();
 		die "fork() failed: $!" unless defined $pid;
 		# child will return to caller
@@ -169,7 +170,7 @@ sub mount {
 	$self->{'read_filenames'} = sub { $self->read_filenames };
 	$self->read_filenames;
 
-	$self->{'mounted'} = 1;
+	$self->{'mounted'} = 1 unless ($arg->{'fork'});
 
 	$fuse_self = \$self;
 
@@ -211,7 +212,7 @@ sub umount {
 	my $self = shift;
 
 	if ($self->{'mounted'}) {
-		system "fusermount -u ".$self->{'mount'} || croak "umount error: $!";
+		system "fusermount -u ".$self->{'mount'} || warn "umount error: $!" && return 0;
 	}
 
 	return 1;

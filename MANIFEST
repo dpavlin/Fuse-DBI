@@ -4,6 +4,7 @@ MANIFEST
 README
 DBI.pm
 t/01load.t
+t/02sqlite.t
 t/99pod.t
 examples/webgui.pl
 META.yml                                 Module meta-data (added by MakeMaker)
