@@ -249,9 +249,11 @@ sub umount {
 	my $self = shift;
 
 	if ($self->{'mount'} && $self->is_mounted) {
-		system "( fusermount -u ".$self->{'mount'}." 2>&1 ) >/dev/null" ||
+		system "( fusermount -u ".$self->{'mount'}." 2>&1 ) >/dev/null";
+		if ($self->is_mounted) {
 			system "sudo umount ".$self->{'mount'} ||
 			return 0;
+		}
 		return 1;
 	}
 
@@ -380,7 +382,7 @@ sub e_getattr {
 
 	# 2 possible types of return values:
 	#return -ENOENT(); # or any other error you care to
-	print "getattr($file) ",join(",",($dev,$ino,$modes,$nlink,$uid,$gid,$rdev,$size,$atime,$mtime,$ctime,$blksize,$blocks)),"\n";
+	#print "getattr($file) ",join(",",($dev,$ino,$modes,$nlink,$uid,$gid,$rdev,$size,$atime,$mtime,$ctime,$blksize,$blocks)),"\n";
 	return ($dev,$ino,$modes,$nlink,$uid,$gid,$rdev,$size,$atime,$mtime,$ctime,$blksize,$blocks);
 }
 
@@ -562,7 +564,7 @@ sub e_statfs {
 
 	my @ret = (255, $inodes, 1, $size, $size-1, BLOCK);
 
-	print "statfs: ",join(",",@ret),"\n";
+	#print "statfs: ",join(",",@ret),"\n";
 
 	return @ret;
 }
