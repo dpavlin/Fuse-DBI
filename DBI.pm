@@ -13,7 +13,7 @@ use Carp;
 use Data::Dumper;
 
 
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 
 =head1 NAME
 
@@ -152,7 +152,16 @@ sub mount {
 		die "fork() failed: $!" unless defined $pid;
 		# child will return to caller
 		if ($pid) {
-			return $self;
+			my $counter = 4;
+			while ($counter && ! $self->is_mounted) {
+				select(undef, undef, undef, 0.5);
+				$counter--;
+			}
+			if ($self->is_mounted) {
+				return $self;
+			} else {
+				return undef;
+			}
 		}
 	}
 
@@ -192,6 +201,32 @@ sub mount {
 
 };
 
+=head2 is_mounted
+
+Check if fuse filesystem is mounted
+
+  if ($mnt->is_mounted) { ... }
+
+=cut
+
+sub is_mounted {
+	my $self = shift;
+
+	my $mounted = 0;
+	my $mount = $self->{'mount'} || confess "can't find mount point!";
+	if (open(MTAB, "/etc/mtab")) {
+		while(<MTAB>) {
+			$mounted = 1 if (/ $mount fuse /i);
+		}
+		close(MTAB);
+	} else {
+		warn "can't open /etc/mtab: $!";
+	}
+
+	return $mounted;
+}
+
+
 =head2 umount
 
 Unmount your database as filesystem.
@@ -206,25 +241,12 @@ database to filesystem.
 sub umount {
 	my $self = shift;
 
-	if ($self->{'mount'}) {
-		if (open(MTAB, "/etc/mtab")) {
-			my $mounted = 0;
-			my $mount = $self->{'mount'};
-			while(<MTAB>) {
-				$mounted = 1 if (/ $mount fuse /i);
-			}
-			close(MTAB);
-		
-			if ($mounted) {
-				system "fusermount -u ".$self->{'mount'}." 2>&1 >/dev/null" || return 0;
-				return 1;
-			}
-
-		} else {
-			warn "can't open /etc/mtab: $!";
-			return 0;
-		}
+	if ($self->{'mount'} && $self->is_mounted) {
+		system "fusermount -u ".$self->{'mount'}." 2>&1 >/dev/null" || return 0;
+		return 1;
 	}
+
+	return 0;
 }
 
 $SIG{'INT'} = sub {
