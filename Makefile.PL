@@ -27,7 +27,9 @@ mount:
 	sudo umount /tmp/db
 
 html: DBI.pm
-	pod2html DBI.pm > DBI.html && rm pod2htm?.tmp
+	pod2html DBI.pm > DBI.html
+	pod2html examples/webgui.pl > WebGUI.html
+	rm pod2htm?.tmp
 
 MAKE_MORE
 }
