@@ -1,6 +1,0 @@
-Revision history for Perl extension Fuse::DBI.
-
-0.01  Sat Aug  7 17:19:26 2004
-	- original version; created by h2xs 1.23 with options
-		-AX -n Fuse::DBI -b 5.8.0
-
