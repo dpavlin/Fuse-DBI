@@ -235,12 +235,11 @@ sub e_getdir {
 	# return as many text filenames as you like, followed by the retval.
 	print((scalar keys %files)." files total\n");
 	my %out;
-	foreach (keys %files) {
-		my $f = $_;
-		$f =~ s/^\E$dirname\Q//;
-		$f =~ s/^\///;
+	foreach my $f (sort keys %files) {
 		if ($dirname) {
-			$out{$f}++ if (/^\E$dirname\Q/ && $f =~ /^[^\/]+$/);
+			if ($f =~ s/^\E$dirname\Q\///) {
+				$out{$f}++ if ($f =~ /^[^\/]+$/);
+			}
 		} else {
 			$out{$f}++ if ($f =~ /^[^\/]+$/);
 		}
@@ -249,6 +248,7 @@ sub e_getdir {
 		$out{'no files? bug?'}++;
 	}
 	print scalar keys %out," files in dir '$dirname'\n";
+	print "## ",join(" ",keys %out),"\n";
 	return (keys %out),0;
 }
 

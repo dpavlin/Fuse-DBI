@@ -25,9 +25,15 @@ my $sql_update = q{
 		where oid = ?;
 };
 
-Fuse::DBI->run({
+my $mnt = Fuse::DBI->mount({
 	filenames => $sql_filenames,
 	read => $sql_read,
 	update => $sql_update,
 	dsn => 'DBI:Pg:dbname=webgui',
+	mount => '/mnt2',
 });
+
+print "Press enter to exit...";
+my $foo = <STDIN>;
+
+$mnt->umount;
