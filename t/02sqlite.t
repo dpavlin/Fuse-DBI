@@ -9,7 +9,7 @@ use blib;
 
 eval "use DBD::SQLite";
 plan skip_all => "DBD::SQLite required for testing" if $@;
-plan tests => 36;
+plan tests => 37;
 
 use_ok('DBI');
 use_ok('Fuse::DBI');
@@ -115,3 +115,4 @@ ok($mnt->umount,"umount");
 
 ok(unlink $test_db,"rm $test_db");
 
+ok(!-e $test_db,"cleanup");
