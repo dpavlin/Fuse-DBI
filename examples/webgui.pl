@@ -182,8 +182,8 @@ my $sql = {
 my $dsn = $config->param('dsn');
 my $db;
 
-if ($dsn =~ m/DBI:(mysql|pg):/) {
-	$db = $1;
+if ($dsn =~ m/DBI:(mysql|pg):/i) {
+	$db = lc($1);
 } else {
 	print STDERR "can't find supported database (mysql/pg) in dsn: $dsn\n";
 	exit 1;
@@ -209,6 +209,11 @@ my $mnt = Fuse::DBI->mount({
 		closedir DIR;
 	},
 });
+
+if (! $mnt) {
+	print STDERR "can't mount filesystem!";
+	exit 1;
+}
 
 print "Press enter to exit...";
 my $foo = <STDIN>;
