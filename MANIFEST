@@ -1,10 +1,12 @@
 Changes
 Makefile.PL
 MANIFEST
+MANIFEST.SKIP
 README
 DBI.pm
 t/01load.t
 t/02sqlite.t
+t/03pgsql.t
 t/99pod.t
 examples/webgui.pl
 META.yml                                 Module meta-data (added by MakeMaker)
