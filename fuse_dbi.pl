@@ -133,7 +133,7 @@ sub e_getdir {
 	if (! %out) {
 		$out{'no files? bug?'}++;
 	}
-	print scalar keys %out," files found for '$dirname': ",keys %out,"\n";
+	print scalar keys %out," files in dir '$dirname'\n";
 	return (keys %out),0;
 }
 
@@ -159,20 +159,20 @@ sub e_read {
 	# (note: 0 means EOF, "0" will give a byte (ascii "0")
 	# to the reading program)
 	my ($file) = filename_fixup(shift);
-	my ($buf,$off) = @_;
+	my ($buf_len,$off) = @_;
 
 	return -ENOENT() unless exists($files{$file});
 
 	my $len = length($files{$file}{cont});
 
-	print "read '$file' [$len bytes] offset $off length $buf\n";
+	print "read '$file' [$len bytes] offset $off length $buf_len\n";
 
 	return -EINVAL() if ($off > $len);
 	return 0 if ($off == $len);
 
-	$buf = $len-$off if ($off+$buf > $len);
+	$buf_len = $buf_len-$off if ($off+$buf_len > $len);
 
-	return substr($files{$file}{cont},$off,$buf);
+	return substr($files{$file}{cont},$off,$buf_len);
 }
 
 sub clear_cont {
@@ -189,6 +189,8 @@ sub clear_cont {
 
 sub update_db {
 	my $file = shift || die;
+
+	$files{$file}{ctime} = time();
 
 	if (!$sth_update->execute($files{$file}{cont},$files{$file}{id})) {
 		print "update problem: ",$sth_update->errstr;
@@ -207,23 +209,23 @@ sub update_db {
 
 sub e_write {
 	my $file = filename_fixup(shift);
-	my ($buf,$off) = @_;
+	my ($buf_len,$off) = @_;
 
 	return -ENOENT() unless exists($files{$file});
 
 	my $len = length($files{$file}{cont});
 
-	print "write '$file' [$len bytes] offset $off length $buf\n";
+	print "write '$file' [$len bytes] offset $off length\n";
 
 	$files{$file}{cont} =
 		substr($files{$file}{cont},0,$off) .
-		$buf .
-		substr($files{$file}{cont},$off+length($buf));
+		$buf_len .
+		substr($files{$file}{cont},$off+length($buf_len));
 
 	if (! update_db($file)) {
 		return -ENOSYS();
 	} else {
-		return length($buf);
+		return length($buf_len);
 	}
 }
 
@@ -241,6 +243,8 @@ sub e_utime {
 	$file = filename_fixup($file);
 
 	return -ENOENT() unless exists($files{$file});
+
+	print "utime '$file' $atime $mtime\n";
 
 	$files{$file}{time} = $mtime;
 	return 0;
