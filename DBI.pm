@@ -85,12 +85,13 @@ sub mount {
 
 	$ctime_start = time();
 
+	my $pid;
 	if ($arg->{'fork'}) {
-		my $pid = fork();
+		$pid = fork();
 		die "fork() failed: $!" unless defined $pid;
 		# child will return to caller
 		if ($pid) {
-			$self ? return $self : return undef;
+			return $self;
 		}
 	}
 
@@ -103,7 +104,7 @@ sub mount {
 
 	$self->read_filenames;
 
-	my $mount = Fuse::main(
+	Fuse::main(
 		mountpoint=>$arg->{'mount'},
 		getattr=>\&e_getattr,
 		getdir=>\&e_getdir,
@@ -117,10 +118,10 @@ sub mount {
 		debug=>0,
 	);
 
-	if (! $mount) {
-		warn "mount on ",$arg->{'mount'}," failed!\n";
-		return undef;
-	}
+	exit(0) if ($arg->{'fork'});
+
+	return 1;
+
 };
 
 =head2 umount

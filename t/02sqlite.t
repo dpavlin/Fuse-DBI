@@ -8,7 +8,7 @@ use blib;
 
 eval "use DBD::SQLite";
 plan skip_all => "DBD::SQLite required for testing" if $@;
-plan tests => 14;
+plan tests => 15;
 
 use_ok('DBI');
 use_ok('Fuse::DBI');
@@ -43,6 +43,8 @@ foreach my $file (qw(file dir/file dir/subdir/file)) {
 	ok($sth->execute($file,$data), "insert $file");
 }
 
+ok($dbh->disconnect, "disconnect after insert");
+
 my $sql_filenames = qq{
 	select
 		name as id,
@@ -72,6 +74,7 @@ my $mnt = Fuse::DBI->mount({
 	update => $sql_update,
 	dsn => $dsn,
 	mount => $mount,
+	fork => 1,
 });
 
 ok($mnt, "mount");

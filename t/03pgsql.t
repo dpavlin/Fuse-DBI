@@ -73,6 +73,7 @@ my $mnt = Fuse::DBI->mount({
 	update => $sql_update,
 	dsn => $dsn,
 	mount => $mount,
+	fork => 1,
 });
 
 ok($mnt, "mount");
