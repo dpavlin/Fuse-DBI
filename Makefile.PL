@@ -31,5 +31,9 @@ html: DBI.pm
 changelog:
 	svn update && svn -v log > Changes
 
+webgui: all
+	sudo umount /mnt2 || echo -n
+	./examples/webgui.pl /data/WebGUI/etc/WebGUI.conf /mnt2
+
 MAKE_MORE
 }
