@@ -10,11 +10,10 @@ use POSIX qw(ENOENT EISDIR EINVAL ENOSYS O_RDWR);
 use Fuse;
 use DBI;
 use Carp;
-use Proc::Simple;
 use Data::Dumper;
 
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 =head1 NAME
 
@@ -48,7 +47,7 @@ It's actually opposite of Oracle's intention to put everything into database.
 Mount your database as filesystem.
 
   my $mnt = Fuse::DBI->mount({
-	filenames => 'select name from filenamefilenames,
+	filenames => 'select name from files_table as filenames',
 	read => 'sql read',
 	update => 'sql update',
 	dsn => 'DBI:Pg:dbname=webgui',
@@ -63,6 +62,7 @@ my $sth;
 my $ctime_start;
 
 sub read_filenames;
+sub fuse_module_loaded;
 
 sub mount {
 	my $class = shift;
@@ -83,41 +83,44 @@ sub mount {
 		carp "mount needs '$_' SQL" unless ($arg->{$_});
 	}
 
-	$dbh = DBI->connect($arg->{'dsn'},$arg->{'user'},$arg->{'password'}, { AutoCommit => 0 }) || die $DBI::errstr;
+	$ctime_start = time();
 
-	print "start transaction\n";
-	$dbh->begin_work || die $dbh->errstr;
+	if ($arg->{'fork'}) {
+		my $pid = fork();
+		die "fork() failed: $!" unless defined $pid;
+		# child will return to caller
+		if ($pid) {
+			$self ? return $self : return undef;
+		}
+	}
+
+	$dbh = DBI->connect($arg->{'dsn'},$arg->{'user'},$arg->{'password'}, {AutoCommit => 0, RaiseError => 1}) || die $DBI::errstr;
 
 	$sth->{filenames} = $dbh->prepare($arg->{'filenames'}) || die $dbh->errstr();
 
 	$sth->{'read'} = $dbh->prepare($arg->{'read'}) || die $dbh->errstr();
 	$sth->{'update'} = $dbh->prepare($arg->{'update'}) || die $dbh->errstr();
 
-	$ctime_start = time();
+	$self->read_filenames;
 
-	read_filenames;
+	my $mount = Fuse::main(
+		mountpoint=>$arg->{'mount'},
+		getattr=>\&e_getattr,
+		getdir=>\&e_getdir,
+		open=>\&e_open,
+		statfs=>\&e_statfs,
+		read=>\&e_read,
+		write=>\&e_write,
+		utime=>\&e_utime,
+		truncate=>\&e_truncate,
+		unlink=>\&e_unlink,
+		debug=>0,
+	);
 
-	$self->{'proc'} = Proc::Simple->new();
-	$self->{'proc'}->kill_on_destroy(1);
-
-	$self->{'proc'}->start( sub {
-		Fuse::main(
-			mountpoint=>$arg->{'mount'},
-			getattr=>\&e_getattr,
-			getdir=>\&e_getdir,
-			open=>\&e_open,
-			statfs=>\&e_statfs,
-			read=>\&e_read,
-			write=>\&e_write,
-			utime=>\&e_utime,
-			truncate=>\&e_truncate,
-			debug=>0,
-		);
-	} );
-
-	confess "Fuse::main failed" if (! $self->{'proc'}->poll);
-
-	$self ? return $self : return undef;
+	if (! $mount) {
+		warn "mount on ",$arg->{'mount'}," failed!\n";
+		return undef;
+	}
 };
 
 =head2 umount
@@ -134,18 +137,31 @@ database to filesystem.
 sub umount {
 	my $self = shift;
 
-	confess "no process running?" unless ($self->{'proc'});
-
 	system "fusermount -u ".$self->{'mount'} || croak "umount error: $!";
 
-	if ($self->{'proc'}->poll) {
-		$self->{'proc'}->kill;
-		return 1 if (! $self->{'proc'}->poll);
-	} else {
-		return 1;
-	}
+	return 1;
 }
 
+=head2 fuse_module_loaded
+
+Checks if C<fuse> module is loaded in kernel.
+
+  die "no fuse module loaded in kernel"
+  	unless (Fuse::DBI::fuse_module_loaded);
+
+This function in called by L<mount>, but might be useful alone also.
+
+=cut
+
+sub fuse_module_loaded {
+	my $lsmod = `lsmod`;
+	die "can't start lsmod: $!" unless ($lsmod);
+	if ($lsmod =~ m/fuse/s) {
+		return 1;
+	} else {
+		return 0;
+	}
+}
 
 my %files;
 my %dirs;
@@ -252,6 +268,17 @@ sub e_getdir {
 	return (keys %out),0;
 }
 
+sub read_content {
+	my ($file,$id) = @_;
+
+	die "read_content needs file and id" unless ($file && $id);
+
+	$sth->{'read'}->execute($id) || die $sth->{'read'}->errstr;
+	$files{$file}{cont} = $sth->{'read'}->fetchrow_array;
+	print "file '$file' content [",length($files{$file}{cont})," bytes] read in cache\n";
+}
+
+
 sub e_open {
 	# VFS sanity check; it keeps all the necessary state, not much to do here.
 	my $file = filename_fixup(shift);
@@ -260,11 +287,8 @@ sub e_open {
 	return -ENOENT() unless exists($files{$file});
 	return -EISDIR() unless exists($files{$file}{id});
 
-	if (!exists($files{$file}{cont})) {
-		$sth->{'read'}->execute($files{$file}{id}) || die $sth->{'read'}->errstr;
-		$files{$file}{cont} = $sth->{'read'}->fetchrow_array;
-		print "file '$file' content read in cache\n";
-	}
+	read_content($file,$files{$file}{id}) unless exists($files{$file}{cont});
+
 	print "open '$file' ",length($files{$file}{cont})," bytes\n";
 	return 0;
 }
@@ -285,7 +309,7 @@ sub e_read {
 	return -EINVAL() if ($off > $len);
 	return 0 if ($off == $len);
 
-	$buf_len = $buf_len-$off if ($off+$buf_len > $len);
+	$buf_len = $len-$off if ($len - $off < $buf_len);
 
 	return substr($files{$file}{cont},$off,$buf_len);
 }
@@ -298,7 +322,7 @@ sub clear_cont {
 		delete $files{$f}{cont};
 	}
 	print "begin new transaction\n";
-	$dbh->begin_work || die $dbh->errstr;
+	#$dbh->begin_work || die $dbh->errstr;
 }
 
 
@@ -307,7 +331,12 @@ sub update_db {
 
 	$files{$file}{ctime} = time();
 
-	if (!$sth->{'update'}->execute($files{$file}{cont},$files{$file}{id})) {
+	my ($cont,$id) = (
+		$files{$file}{cont},
+		$files{$file}{id}
+	);
+
+	if (!$sth->{'update'}->execute($cont,$id)) {
 		print "update problem: ",$sth->{'update'}->errstr;
 		clear_cont;
 		return 0;
@@ -337,7 +366,7 @@ sub e_write {
 
 	$files{$file}{cont} .= substr($cont,0,$off) if ($off > 0);
 	$files{$file}{cont} .= $buffer;
-	$files{$file}{cont} .= substr($cont,-($off+length($buffer))) if ($off+length($buffer) > $len);
+	$files{$file}{cont} .= substr($cont,$off+length($buffer),$len-$off-length($buffer)) if ($off+length($buffer) < $len);
 
 	$files{$file}{size} = length($files{$file}{cont});
 
@@ -374,6 +403,17 @@ sub e_utime {
 
 sub e_statfs { return 255, 1, 1, 1, 1, 2 }
 
+sub e_unlink {
+	my $file = filename_fixup(shift);
+
+	return -ENOENT() unless exists($files{$file});
+
+	print "unlink '$file' will invalidate cache\n";
+
+	read_content($file,$files{$file}{id});
+
+	return 0;
+}
 1;
 __END__
 
