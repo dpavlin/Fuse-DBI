@@ -76,6 +76,9 @@ sub mount {
 	carp "mount needs 'dsn' to connect to (e.g. dsn => 'DBI:Pg:dbname=test')" unless ($arg->{'dsn'});
 	carp "mount needs 'mount' as mountpoint" unless ($arg->{'mount'});
 
+	# save (some) arguments in self
+	$self->{$_} = $arg->{$_} foreach (qw(mount));
+
 	foreach (qw(filenames read update)) {
 		carp "mount needs '$_' SQL" unless ($arg->{$_});
 	}
@@ -112,6 +115,8 @@ sub mount {
 		);
 	} );
 
+	confess "Fuse::main failed" if (! $self->{'proc'}->poll);
+
 	$self ? return $self : return undef;
 };
 
@@ -130,7 +135,15 @@ sub umount {
 	my $self = shift;
 
 	confess "no process running?" unless ($self->{'proc'});
-	$self->{'proc'}->kill;
+
+	system "fusermount -u ".$self->{'mount'} || croak "umount error: $!";
+
+	if ($self->{'proc'}->poll) {
+		$self->{'proc'}->kill;
+		return 1 if (! $self->{'proc'}->poll);
+	} else {
+		return 1;
+	}
 }
 
 

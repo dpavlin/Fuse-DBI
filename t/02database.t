@@ -39,8 +39,8 @@ my $mnt = Fuse::DBI->mount({
 
 ok($mnt, "mount");
 
-diag "mounted sleeping for 5 sec";
-system "ls -lR /mnt2";
-sleep(5);
+diag "press enter to continue";
+my $foo = <STDIN>;
 
 ok($mnt->umount,"umount");
+
