@@ -15,22 +15,21 @@ WriteMakefile(
     ($] >= 5.005 ?     ## Add these new keywords supported since 5.005
       (ABSTRACT_FROM  => 'DBI.pm', # retrieve abstract from module
        AUTHOR         => 'Dobrica Pavlinusic <dpavlin@rot13.org>') : ()),
+    depend => {
+	dist => 'changelog',
+    },
 );
 
 sub MY::postamble {
 	return <<'MAKE_MORE';
 
-mount:
-	mkdir -f /tmp/db
-	sudo modprobe fuse
-	sudo umount /tmp/db || exit 0
-	./fuse_dbi.pl /tmp/db
-	sudo umount /tmp/db
-
 html: DBI.pm
 	pod2html DBI.pm > DBI.html
 	pod2html examples/webgui.pl > WebGUI.html
 	rm pod2htm?.tmp
+
+changelog:
+	svn update && svn -v log > Changes
 
 MAKE_MORE
 }
