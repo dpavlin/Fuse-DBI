@@ -8,8 +8,8 @@ use strict;
 
 my $sql_filenames = q{
 	select
-		templateid as id,
-		namespace||'/'||name||' ['||templateid||']' as filename,
+		oid as id,
+		namespace||'/'||name||' ['||oid||']' as filename,
 		length(template) as size,
 		iseditable as writable
 	from template ;
@@ -18,7 +18,7 @@ my $sql_filenames = q{
 my $sql_content = q{
 	select template
 	from template
-	where templateid = ?;
+	where oid = ?;
 };
 
 
@@ -135,25 +135,34 @@ sub e_getdir {
 sub e_open {
 	# VFS sanity check; it keeps all the necessary state, not much to do here.
 	my ($file) = filename_fixup(shift);
-	print("open called\n");
 	return -ENOENT() unless exists($files{$file});
 	return -EISDIR() unless exists($files{$file}{id});
 	if (!exists($files{$file}{cont})) {
 		$sth_content->execute($files{$file}{id});
-		($files{$file}{cont}) = $sth_content->fetchrow_array;
+		$files{$file}{cont} = $sth_content->fetchrow_array;
 	}
-	print("open ok\n");
+	print "open '$file' ",length($files{$file}{cont})," bytes\n";
 	return 0;
 }
 
 sub e_read {
-	# return an error numeric, or binary/text string.  (note: 0 means EOF, "0" will
-	# give a byte (ascii "0") to the reading program)
+	# return an error numeric, or binary/text string.
+	# (note: 0 means EOF, "0" will give a byte (ascii "0")
+	# to the reading program)
 	my ($file) = filename_fixup(shift);
 	my ($buf,$off) = @_;
+
 	return -ENOENT() unless exists($files{$file});
-	return -EINVAL() if $off > length($files{$file}{cont});
-	return 0 if $off == length($files{$file}{cont});
+
+	my $len = length($files{$file}{cont});
+
+	print "read '$file' [$len bytes] offset $off length $buf\n";
+
+	return -EINVAL() if ($off > $len);
+	return 0 if ($off == $len);
+
+	$buf = $len-$off if ($off+$buf > $len);
+
 	return substr($files{$file}{cont},$off,$buf);
 }
 
