@@ -1,7 +1,18 @@
-Fuse-DBI version 0.01
-=====================
+Fuse::DBI - mount your database as filesystem and use it
+========================================================
 
-Type perldoc Fuse::DBI to get instructions
+This module will use Fuse module, part of FUSE (Filesystem in USErspace)
+available at http://fuse.sourceforge.net/ to mount your database as file
+system.
+
+That will give you possibility to use normal file-system tools (cat, grep,
+vi) to manipulate data in database.
+
+It's actually opposite of Oracle's intention to put everything into
+database.
+
+Type perldoc Fuse::DBI or perldoc examples/webgui.pl to get more
+instructions.
 
 INSTALLATION
 
@@ -16,7 +27,14 @@ DEPENDENCIES
 
 This module requires these other modules and libraries:
 
-   FIX
+   Fuse
+   DBI
+   Carp
+   POSIX
+   File::Find
+
+Fuse module comes from CVS version of Fuse. If you have problem compiling
+it, try to apply patch from fuse-perl-patch directory.
 
 COPYRIGHT AND LICENCE
 
@@ -25,5 +43,4 @@ Copyright (C) 2004 by Dobrica Pavlinusic
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.8.4 or,
 at your option, any later version of Perl 5 you may have available.
-
 
