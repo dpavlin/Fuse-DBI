@@ -221,7 +221,7 @@ C<Fuse::DBI> website
 L<http://www.rot13.org/~dpavlin/fuse_dbi.html>
 
 C<FUSE (Filesystem in USErspace)> website
-L<http://sourceforge.net/projects/avf>
+L<http://fuse.sourceforge.net/>
 
 =head1 AUTHOR
 

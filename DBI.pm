@@ -29,7 +29,7 @@ See C<run> below for examples how to set parameters.
 =head1 DESCRIPTION
 
 This module will use C<Fuse> module, part of C<FUSE (Filesystem in USErspace)>
-available at L<http://sourceforge.net/projects/avf> to mount
+available at L<http://fuse.sourceforge.net/> to mount
 your database as file system.
 
 That will give you possibility to use normal file-system tools (cat, grep, vi)
@@ -524,7 +524,7 @@ Nothing.
 =head1 SEE ALSO
 
 C<FUSE (Filesystem in USErspace)> website
-L<http://sourceforge.net/projects/avf>
+L<http://fuse.sourceforge.net/>
 
 Example for WebGUI which comes with this distribution in
 directory C<examples/webgui.pl>. It also contains a lot of documentation
