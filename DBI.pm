@@ -84,7 +84,6 @@ sub mount {
 	# save (some) arguments in self
 	foreach (qw(mount invalidate)) {
 		$self->{$_} = $arg->{$_};
-		$fuse_self->{$_} = $arg->{$_};
 	}
 
 	foreach (qw(filenames read update)) {
@@ -105,12 +104,20 @@ sub mount {
 
 	$dbh = DBI->connect($arg->{'dsn'},$arg->{'user'},$arg->{'password'}, {AutoCommit => 0, RaiseError => 1}) || die $DBI::errstr;
 
-	$sth->{filenames} = $dbh->prepare($arg->{'filenames'}) || die $dbh->errstr();
+	$sth->{'filenames'} = $dbh->prepare($arg->{'filenames'}) || die $dbh->errstr();
 
 	$sth->{'read'} = $dbh->prepare($arg->{'read'}) || die $dbh->errstr();
 	$sth->{'update'} = $dbh->prepare($arg->{'update'}) || die $dbh->errstr();
 
+
+	$self->{'sth'} = $sth;
+
+	$self->{'read_filenames'} = sub { $self->read_filenames };
 	$self->read_filenames;
+
+	$self->{'mounted'} = 1;
+
+	$fuse_self = \$self;
 
 	Fuse::main(
 		mountpoint=>$arg->{'mount'},
@@ -123,8 +130,11 @@ sub mount {
 		utime=>\&e_utime,
 		truncate=>\&e_truncate,
 		unlink=>\&e_unlink,
+		rmdir=>\&e_unlink,
 		debug=>0,
 	);
+	
+	$self->{'mounted'} = 0;
 
 	exit(0) if ($arg->{'fork'});
 
@@ -146,18 +156,21 @@ database to filesystem.
 sub umount {
 	my $self = shift;
 
-	system "fusermount -u ".$self->{'mount'} || croak "umount error: $!";
+	if ($self->{'mounted'}) {
+		system "fusermount -u ".$self->{'mount'} || croak "umount error: $!";
+	}
 
 	return 1;
 }
 
-#$SIG{'INT'} = sub {
-#	print STDERR "umount called by SIG INT\n";
-#	umount;
-#};
+$SIG{'INT'} = sub {
+	print STDERR "umount called by SIG INT\n";
+	umount;
+};
 
 sub DESTROY {
 	my $self = shift;
+	return if (! $self->{'mounted'});
 	print STDERR "umount called by DESTROY\n";
 	$self->umount;
 }
@@ -188,6 +201,8 @@ my %dirs;
 
 sub read_filenames {
 	my $self = shift;
+
+	my $sth = $self->{'sth'} || die "no sth argument";
 
 	# create empty filesystem
 	(%files) = (
@@ -295,6 +310,7 @@ sub read_content {
 
 	$sth->{'read'}->execute($id) || die $sth->{'read'}->errstr;
 	$files{$file}{cont} = $sth->{'read'}->fetchrow_array;
+	$files{$file}{ctime} = time();
 	print "file '$file' content [",length($files{$file}{cont})," bytes] read in cache\n";
 }
 
@@ -368,7 +384,7 @@ sub update_db {
 		}
 		print "updated '$file' [",$files{$file}{id},"]\n";
 
-		$fuse_self->{'invalidate'}->() if (ref $fuse_self->{'invalidate'});
+		$$fuse_self->{'invalidate'}->() if (ref $$fuse_self->{'invalidate'});
 	}
 	return 1;
 }
@@ -428,13 +444,18 @@ sub e_statfs { return 255, 1, 1, 1, 1, 2 }
 sub e_unlink {
 	my $file = filename_fixup(shift);
 
-	return -ENOENT() unless exists($files{$file});
+	if (exists( $dirs{$file} )) {
+		print "unlink '$file' will re-read template names\n";
+		print Dumper($fuse_self);
+		$$fuse_self->{'read_filenames'}->();
+		return 0;
+	} elsif (exists( $files{$file} )) {
+		print "unlink '$file' will invalidate cache\n";
+		read_content($file,$files{$file}{id});
+		return 0;
+	}
 
-	print "unlink '$file' will invalidate cache\n";
-
-	read_content($file,$files{$file}{id});
-
-	return 0;
+	return -ENOENT();
 }
 1;
 __END__
