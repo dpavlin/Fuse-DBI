@@ -9,7 +9,7 @@ use strict;
 my $sql_filenames = q{
 	select
 		templateid as id,
-		namespace||'/'||name as filename,
+		namespace||'/'||name||' ['||templateid||']' as filename,
 		length(template) as size,
 		iseditable as writable
 	from template ;
@@ -119,7 +119,7 @@ sub e_getdir {
 		$f =~ s/^\E$dirname\Q//;
 		$f =~ s/^\///;
 		if ($dirname) {
-			$out{$f}++ if (/^\E$dirname\Q/);
+			$out{$f}++ if (/^\E$dirname\Q/ && $f =~ /^[^\/]+$/);
 		} else {
 			$out{$f}++ if ($f =~ /^[^\/]+$/);
 		}
