@@ -9,5 +9,6 @@ t/02sqlite.t
 t/03pgsql.t
 t/99pod.t
 examples/webgui.pl
-fuse-perl-patch/cvs-20041116.diff
+fuse-perl-patch/cvs-api_fix.diff
+fuse-perl-patch/cvs-blocks_fix.diff
 META.yml                                 Module meta-data (added by MakeMaker)
