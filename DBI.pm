@@ -14,7 +14,7 @@ use Proc::Simple;
 use Data::Dumper;
 
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 =head1 NAME
 
@@ -86,7 +86,7 @@ sub mount {
 	$dbh = DBI->connect($arg->{'dsn'},$arg->{'user'},$arg->{'password'}, { AutoCommit => 0 }) || die $DBI::errstr;
 
 	print "start transaction\n";
-	#$dbh->begin_work || die $dbh->errstr;
+	$dbh->begin_work || die $dbh->errstr;
 
 	$sth->{filenames} = $dbh->prepare($arg->{'filenames'}) || die $dbh->errstr();
 
@@ -324,23 +324,27 @@ sub update_db {
 
 sub e_write {
 	my $file = filename_fixup(shift);
-	my ($buf_len,$off) = @_;
+	my ($buffer,$off) = @_;
 
 	return -ENOENT() unless exists($files{$file});
 
-	my $len = length($files{$file}{cont});
+	my $cont = $files{$file}{cont};
+	my $len = length($cont);
 
-	print "write '$file' [$len bytes] offset $off length\n";
+	print "write '$file' [$len bytes] offset $off length ",length($buffer),"\n";
 
-	$files{$file}{cont} =
-		substr($files{$file}{cont},0,$off) .
-		$buf_len .
-		substr($files{$file}{cont},$off+length($buf_len));
+	$files{$file}{cont} = "";
+
+	$files{$file}{cont} .= substr($cont,0,$off) if ($off > 0);
+	$files{$file}{cont} .= $buffer;
+	$files{$file}{cont} .= substr($cont,-($off+length($buffer))) if ($off+length($buffer) > $len);
+
+	$files{$file}{size} = length($files{$file}{cont});
 
 	if (! update_db($file)) {
 		return -ENOSYS();
 	} else {
-		return length($buf_len);
+		return length($buffer);
 	}
 }
 
@@ -348,7 +352,10 @@ sub e_truncate {
 	my $file = filename_fixup(shift);
 	my $size = shift;
 
+	print "truncate to $size\n";
+
 	$files{$file}{cont} = substr($files{$file}{cont},0,$size);
+	$files{$file}{size} = $size;
 	return 0
 };
 
