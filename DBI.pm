@@ -13,7 +13,7 @@ use Carp;
 use Data::Dumper;
 
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 =head1 NAME
 
@@ -148,7 +148,6 @@ sub mount {
 
 	my $pid;
 	if ($arg->{'fork'}) {
-		$self->{'mounted'} = 1;
 		$pid = fork();
 		die "fork() failed: $!" unless defined $pid;
 		# child will return to caller
@@ -170,8 +169,6 @@ sub mount {
 	$self->{'read_filenames'} = sub { $self->read_filenames };
 	$self->read_filenames;
 
-	$self->{'mounted'} = 1 unless ($arg->{'fork'});
-
 	$fuse_self = \$self;
 
 	Fuse::main(
@@ -189,8 +186,6 @@ sub mount {
 		debug=>0,
 	);
 	
-	$self->{'mounted'} = 0;
-
 	exit(0) if ($arg->{'fork'});
 
 	return 1;
@@ -211,23 +206,44 @@ database to filesystem.
 sub umount {
 	my $self = shift;
 
-	if ($self->{'mounted'}) {
-		system "fusermount -u ".$self->{'mount'} || warn "umount error: $!" && return 0;
-	}
+	if ($self->{'mount'}) {
+		if (open(MTAB, "/etc/mtab")) {
+			my $mounted = 0;
+			my $mount = $self->{'mount'};
+			while(<MTAB>) {
+				$mounted = 1 if (/ $mount fuse /i);
+			}
+			close(MTAB);
+		
+			if ($mounted) {
+				system "fusermount -u ".$self->{'mount'}." 2>&1 >/dev/null" || return 0;
+				return 1;
+			}
 
-	return 1;
+		} else {
+			warn "can't open /etc/mtab: $!";
+			return 0;
+		}
+	}
 }
 
 $SIG{'INT'} = sub {
-	print STDERR "umount called by SIG INT\n";
-	umount;
+	if ($fuse_self && $$fuse_self->umount) {
+		print STDERR "umount called by SIG INT\n";
+	}
+};
+
+$SIG{'QUIT'} = sub {
+	if ($fuse_self && $$fuse_self->umount) {
+		print STDERR "umount called by SIG QUIT\n";
+	}
 };
 
 sub DESTROY {
 	my $self = shift;
-	return if (! $self->{'mounted'});
-	print STDERR "umount called by DESTROY\n";
-	$self->umount;
+	if ($self->umount) {
+		print STDERR "umount called by DESTROY\n";
+	}
 }
 
 =head2 fuse_module_loaded
@@ -262,6 +278,10 @@ sub read_filenames {
 	# create empty filesystem
 	(%files) = (
 		'.' => {
+			type => 0040,
+			mode => 0755,
+		},
+		'..' => {
 			type => 0040,
 			mode => 0755,
 		},
@@ -520,6 +540,12 @@ __END__
 =head1 EXPORT
 
 Nothing.
+
+=head1 BUGS
+
+Size information (C<ls -s>) is wrong. It's a problem in upstream Fuse module
+(for which I'm to blame lately), so when it gets fixes, C<Fuse::DBI> will
+automagically pick it up.
 
 =head1 SEE ALSO
 
