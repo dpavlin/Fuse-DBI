@@ -24,11 +24,11 @@ Fuse::DBI - mount your database as filesystem and use it
   use Fuse::DBI;
   Fuse::DBI->mount( ... );
 
-See L<run> below for examples how to set parametars.
+See C<run> below for examples how to set parametars.
 
 =head1 DESCRIPTION
 
-This module will use L<Fuse> module, part of C<FUSE (Filesystem in USErspace)>
+This module will use C<Fuse> module, part of C<FUSE (Filesystem in USErspace)>
 available at L<http://sourceforge.net/projects/avf> to mount
 your database as file system.
 
