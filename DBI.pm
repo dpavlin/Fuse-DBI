@@ -13,7 +13,7 @@ use Carp;
 use Data::Dumper;
 
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 =head1 NAME
 
@@ -24,7 +24,7 @@ Fuse::DBI - mount your database as filesystem and use it
   use Fuse::DBI;
   Fuse::DBI->mount( ... );
 
-See C<run> below for examples how to set parametars.
+See C<run> below for examples how to set parameters.
 
 =head1 DESCRIPTION
 
@@ -32,7 +32,7 @@ This module will use C<Fuse> module, part of C<FUSE (Filesystem in USErspace)>
 available at L<http://sourceforge.net/projects/avf> to mount
 your database as file system.
 
-That will give you posibility to use normal file-system tools (cat, grep, vi)
+That will give you possibility to use normal file-system tools (cat, grep, vi)
 to manipulate data in database.
 
 It's actually opposite of Oracle's intention to put everything into database.
@@ -46,14 +46,68 @@ It's actually opposite of Oracle's intention to put everything into database.
 
 Mount your database as filesystem.
 
+Let's suppose that your database have table C<files> with following structure:
+
+ id:		int
+ filename:	text
+ size:		int
+ content:	text
+ writable:	boolean
+
+Following is example how to mount table like that to C</mnt>:
+
   my $mnt = Fuse::DBI->mount({
-	filenames => 'select name from files_table as filenames',
-	read => 'sql read',
-	update => 'sql update',
-	dsn => 'DBI:Pg:dbname=webgui',
-	user => 'database_user',
-	password => 'database_password'
+	'filenames' => 'select id,filename,size,writable from files',
+	'read' => 'select content from files where id = ?',
+	'update' => 'update files set content = ? where id = ?',
+	'dsn' => 'DBI:Pg:dbname=test_db',
+	'user' => 'database_user',
+	'password' => 'database_password',
+	'invalidate' => sub { ... },
   });
+
+Options:
+
+=over 5
+
+=item filenames
+
+SQL query which returns C<id> (unique id for that row), C<filename>,
+C<size> and C<writable> boolean flag.
+
+=item read
+
+SQL query which returns only one column with content of file and has
+placeholder C<?> for C<id>.
+
+=item update
+
+SQL query with two pace-holders, one for new content and one for C<id>.
+
+=item dsn
+
+C<DBI> dsn to connect to (contains database driver and name of database).
+
+=item user
+
+User with which to connect to database
+
+=item password
+
+Password for connecting to database
+
+=item invalidate
+
+Optional anonymous code reference which will be executed when data is updated in
+database. It can be used as hook to delete cache (for example on-disk-cache)
+which is created from data edited through C<Fuse::DBI>.
+
+=item fork
+
+Optional flag which forks after mount so that executing script will continue
+running. Implementation is experimental.
+
+=back
 
 =cut
 
@@ -182,7 +236,7 @@ Checks if C<fuse> module is loaded in kernel.
   die "no fuse module loaded in kernel"
   	unless (Fuse::DBI::fuse_module_loaded);
 
-This function in called by L<mount>, but might be useful alone also.
+This function in called by C<mount>, but might be useful alone also.
 
 =cut
 
@@ -468,6 +522,10 @@ Nothing.
 
 C<FUSE (Filesystem in USErspace)> website
 L<http://sourceforge.net/projects/avf>
+
+Example for WebGUI which comes with this distribution in
+directory L<examples/webgui.pl>. It also contains a lot of documentation
+about design of this module, usage and limitations.
 
 =head1 AUTHOR
 
