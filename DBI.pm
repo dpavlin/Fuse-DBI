@@ -64,6 +64,11 @@ my $ctime_start;
 sub read_filenames;
 sub fuse_module_loaded;
 
+# evil, evil way to solve this. It makes this module non-reentrant. But, since
+# fuse calls another copy of this script for each mount anyway, this shouldn't
+# be a problem.
+my $fuse_self;
+
 sub mount {
 	my $class = shift;
 	my $self = {};
@@ -77,7 +82,10 @@ sub mount {
 	carp "mount needs 'mount' as mountpoint" unless ($arg->{'mount'});
 
 	# save (some) arguments in self
-	$self->{$_} = $arg->{$_} foreach (qw(mount));
+	foreach (qw(mount invalidate)) {
+		$self->{$_} = $arg->{$_};
+		$fuse_self->{$_} = $arg->{$_};
+	}
 
 	foreach (qw(filenames read update)) {
 		carp "mount needs '$_' SQL" unless ($arg->{$_});
@@ -141,6 +149,17 @@ sub umount {
 	system "fusermount -u ".$self->{'mount'} || croak "umount error: $!";
 
 	return 1;
+}
+
+#$SIG{'INT'} = sub {
+#	print STDERR "umount called by SIG INT\n";
+#	umount;
+#};
+
+sub DESTROY {
+	my $self = shift;
+	print STDERR "umount called by DESTROY\n";
+	$self->umount;
 }
 
 =head2 fuse_module_loaded
@@ -348,6 +367,8 @@ sub update_db {
 			return 0;
 		}
 		print "updated '$file' [",$files{$file}{id},"]\n";
+
+		$fuse_self->{'invalidate'}->() if (ref $fuse_self->{'invalidate'});
 	}
 	return 1;
 }
