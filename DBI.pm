@@ -9,6 +9,10 @@ use warnings;
 use POSIX qw(ENOENT EISDIR EINVAL ENOSYS O_RDWR);
 use Fuse;
 use DBI;
+use Carp;
+use Proc::Simple;
+use Data::Dumper;
+
 
 our $VERSION = '0.01';
 
@@ -19,7 +23,7 @@ Fuse::DBI - mount your database as filesystem and use it
 =head1 SYNOPSIS
 
   use Fuse::DBI;
-  Fuse::DBI->run( ... );
+  Fuse::DBI->mount( ... );
 
 See L<run> below for examples how to set parametars.
 
@@ -39,11 +43,11 @@ It's actually opposite of Oracle's intention to put everything into database.
 
 =cut
 
-=head2 run
+=head2 mount
 
 Mount your database as filesystem.
 
-  Fuse::DBI->run({
+  my $mnt = Fuse::DBI->mount({
 	filenames => 'select name from filenamefilenames,
 	read => 'sql read',
 	update => 'sql update',
@@ -58,16 +62,22 @@ my $dbh;
 my $sth;
 my $ctime_start;
 
-sub run {
-	my $self = shift
+sub read_filenames;
 
-	my $arg = {@_};
+sub mount {
+	my $class = shift;
+	my $self = {};
+	bless($self, $class);
 
-	carp "run needs 'dsn' to connect to (e.g. dsn => 'DBI:Pg:dbname=test')" unless ($arg->{'dsn'});
-	carp "run needs 'mount' as mountpoint" unless ($arg->{'mount'});
+	my $arg = shift;
+
+	print Dumper($arg);
+
+	carp "mount needs 'dsn' to connect to (e.g. dsn => 'DBI:Pg:dbname=test')" unless ($arg->{'dsn'});
+	carp "mount needs 'mount' as mountpoint" unless ($arg->{'mount'});
 
 	foreach (qw(filenames read update)) {
-		carp "run needs '$_' SQL" unless ($arg->{$_});
+		carp "mount needs '$_' SQL" unless ($arg->{$_});
 	}
 
 	$dbh = DBI->connect($arg->{'dsn'},$arg->{'user'},$arg->{'password'}, { AutoCommit => 0 }) || die $DBI::errstr;
@@ -84,24 +94,52 @@ sub run {
 
 	read_filenames;
 
-	Fuse::main(
-		mountpoint=>$arg->{'mount'},
-		getattr=>\&e_getattr,
-		getdir=>\&e_getdir,
-		open=>\&e_open,
-		statfs=>\&e_statfs,
-		read=>\&e_read,
-		write=>\&e_write,
-		utime=>\&e_utime,
-		truncate=>\&e_truncate,
-		debug=>0,
-	);
+	$self->{'proc'} = Proc::Simple->new();
+	$self->{'proc'}->kill_on_destroy(1);
+
+	$self->{'proc'}->start( sub {
+		Fuse::main(
+			mountpoint=>$arg->{'mount'},
+			getattr=>\&e_getattr,
+			getdir=>\&e_getdir,
+			open=>\&e_open,
+			statfs=>\&e_statfs,
+			read=>\&e_read,
+			write=>\&e_write,
+			utime=>\&e_utime,
+			truncate=>\&e_truncate,
+			debug=>0,
+		);
+	} );
+
+	$self ? return $self : return undef;
 };
+
+=head2 umount
+
+Unmount your database as filesystem.
+
+  $mnt->umount;
+
+This will also kill background process which is translating
+database to filesystem.
+
+=cut
+
+sub umount {
+	my $self = shift;
+
+	confess "no process running?" unless ($self->{'proc'});
+	$self->{'proc'}->kill;
+}
+
 
 my %files;
 my %dirs;
 
 sub read_filenames {
+	my $self = shift;
+
 	# create empty filesystem
 	(%files) = (
 		'.' => {

@@ -6,11 +6,13 @@ WriteMakefile(
     NAME              => 'Fuse::DBI',
     VERSION_FROM      => 'DBI.pm', # finds $VERSION
     PREREQ_PM         => {
-    	Fuse => 0,
 	POSIX => 0,
+    	Fuse => 0,
+	DBI => 0,
+	Carp => 0,
     }, # e.g., Module::Name => 1.1
     ($] >= 5.005 ?     ## Add these new keywords supported since 5.005
-      (ABSTRACT_FROM  => 'lib/Fuse/DBI.pm', # retrieve abstract from module
+      (ABSTRACT_FROM  => 'DBI.pm', # retrieve abstract from module
        AUTHOR         => 'Dobrica Pavlinusic <dpavlin@rot13.org>') : ()),
 );
 
