@@ -12,8 +12,10 @@ use DBI;
 use Carp;
 use Data::Dumper;
 
-
 our $VERSION = '0.07';
+
+# block size for this filesystem
+use constant BLOCK => 1024;
 
 =head1 NAME
 
@@ -247,7 +249,7 @@ sub umount {
 	my $self = shift;
 
 	if ($self->{'mount'} && $self->is_mounted) {
-		system "fusermount -u ".$self->{'mount'}." 2>&1 >/dev/null" ||
+		system "( fusermount -u ".$self->{'mount'}." 2>&1 ) >/dev/null" ||
 			system "sudo umount ".$self->{'mount'} ||
 			return 0;
 		return 1;
@@ -369,8 +371,8 @@ sub e_getattr {
 	$file =~ s,^/,,;
 	$file = '.' unless length($file);
 	return -ENOENT() unless exists($files{$file});
-	my ($size) = $files{$file}{size} || 1024;
-	my ($dev, $ino, $rdev, $blocks, $gid, $uid, $nlink, $blksize) = (0,0,0,int(($size+1023)/1024),0,0,1,1024);
+	my ($size) = $files{$file}{size} || BLOCK;
+	my ($dev, $ino, $rdev, $blocks, $gid, $uid, $nlink, $blksize) = (0,0,0,int(($size+BLOCK-1)/BLOCK),0,0,1,BLOCK);
 	my ($atime, $ctime, $mtime);
 	$atime = $ctime = $mtime = $files{$file}{ctime} || $ctime_start;
 
@@ -556,9 +558,9 @@ sub e_statfs {
 		print "$inodes: $f [$size]\n";
 	}
 
-	$size = int(($size+1023)/1024);
+	$size = int(($size+BLOCK-1)/BLOCK);
 
-	my @ret = (255, $inodes+1000, $inodes, $size, $size-10, 1024);
+	my @ret = (255, $inodes, 1, $size, $size-1, BLOCK);
 
 	print "statfs: ",join(",",@ret),"\n";
 
