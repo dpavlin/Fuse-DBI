@@ -1,4 +1,5 @@
 all:
+	sudo modprobe fuse
 	sudo umount /mnt2 || exit 0
 	./fuse_dbi.pl /mnt2
 	sudo umount /mnt2

@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-use POSIX qw(ENOENT EISDIR EINVAL);
+use POSIX qw(ENOENT EISDIR EINVAL O_RDWR);
 use Fuse;
 
 use DBI;
@@ -15,10 +15,16 @@ my $sql_filenames = q{
 	from template ;
 };
 
-my $sql_content = q{
+my $sql_read = q{
 	select template
-	from template
-	where oid = ?;
+		from template
+		where oid = ?;
+};
+
+my $sql_update = q{
+	update template
+		set template = ?	
+		where oid = ?;
 };
 
 
@@ -31,7 +37,8 @@ print STDERR "$sql_filenames\n";
 my $sth_filenames = $dbh->prepare($sql_filenames) || die $dbh->errstr();
 $sth_filenames->execute() || die $sth_filenames->errstr();
 
-my $sth_content = $dbh->prepare($sql_content) || die $dbh->errstr();
+my $sth_read = $dbh->prepare($sql_read) || die $dbh->errstr();
+my $sth_update = $dbh->prepare($sql_update) || die $dbh->errstr();
 
 print "#",join(",",@{ $sth_filenames->{NAME} }),"\n";
 
@@ -132,14 +139,29 @@ sub e_getdir {
 	return (keys %out),0;
 }
 
+my $in_transaction = 0;
+
 sub e_open {
 	# VFS sanity check; it keeps all the necessary state, not much to do here.
-	my ($file) = filename_fixup(shift);
+	my $file = filename_fixup(shift);
+	my $flags = shift;
+
 	return -ENOENT() unless exists($files{$file});
 	return -EISDIR() unless exists($files{$file}{id});
+
+	if (! $in_transaction) {
+		# begin transaction
+		if (! $dbh->begin_work) {
+			print "transaction begin: ",$dbh->errstr;
+			return -ENOENT();
+		}
+	}
+	$in_transaction++;
+	print "files opened: $in_transaction\n";
+
 	if (!exists($files{$file}{cont})) {
-		$sth_content->execute($files{$file}{id});
-		$files{$file}{cont} = $sth_content->fetchrow_array;
+		$sth_read->execute($files{$file}{id}) || die $sth_read->errstr;
+		$files{$file}{cont} = $sth_read->fetchrow_array;
 	}
 	print "open '$file' ",length($files{$file}{cont})," bytes\n";
 	return 0;
@@ -166,6 +188,77 @@ sub e_read {
 	return substr($files{$file}{cont},$off,$buf);
 }
 
+sub clear_cont {
+	print "invalidate all cached content\n";
+	foreach my $f (keys %files) {
+		delete $files{$f}{cont};
+	}
+}
+
+
+sub update_db {
+	my $file = shift || die;
+
+	if (!$sth_update->execute($files{$file}{cont},$files{$file}{id})) {
+		print "update problem: ",$sth_update->errstr;
+		$dbh->rollback;
+		clear_cont;
+		$dbh->begin_work;
+		return 0;
+	} else {
+		if ($dbh->commit) {
+			print "commit problem: ",$sth_update->errstr;
+			$dbh->rollback;
+			clear_cont;
+			$dbh->begin_work;
+			return 0;
+		}
+		print "updated '$file' [",$files{$file}{id},"]\n";
+	}
+	return 1;
+}
+
+sub e_write {
+	my $file = filename_fixup(shift);
+	my ($buf,$off) = @_;
+
+	return -ENOENT() unless exists($files{$file});
+
+	my $len = length($files{$file}{cont});
+
+	print "write '$file' [$len bytes] offset $off length $buf\n";
+
+	$files{$file}{cont} =
+		substr($files{$file}{cont},0,$off) .
+		$buf .
+		substr($files{$file}{cont},$off+length($buf));
+
+	if (! update_db($file)) {
+		return -ENOSYS();
+	} else {
+		return length($buf);
+	}
+}
+
+sub e_truncate {
+	my $file = filename_fixup(shift);
+	my $size = shift;
+
+	$files{$file}{cont} = substr($files{$file}{cont},0,$size);
+	return 0
+};
+
+
+sub e_utime {
+	my ($atime,$mtime,$file) = @_;
+	$file = filename_fixup($file);
+
+	return -ENOENT() unless exists($files{$file});
+
+	$files{$file}{time} = $mtime;
+	return 0;
+}
+
 sub e_statfs { return 255, 1, 1, 1, 1, 2 }
 
 # If you run the script directly, it will run fusermount, which will in turn
@@ -179,5 +272,8 @@ Fuse::main(
 	open=>\&e_open,
 	statfs=>\&e_statfs,
 	read=>\&e_read,
+	write=>\&e_write,
+	utime=>\&e_utime,
+	truncate=>\&e_truncate,
 	debug=>1,
 );
