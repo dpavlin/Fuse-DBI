@@ -342,7 +342,7 @@ sub e_getdir {
 	my %out;
 	foreach my $f (sort keys %files) {
 		if ($dirname) {
-			if ($f =~ s/^\E$dirname\Q\///) {
+			if ($f =~ s/^\Q$dirname\E\///) {
 				$out{$f}++ if ($f =~ /^[^\/]+$/);
 			}
 		} else {
