@@ -1,93 +1,157 @@
 #!/usr/bin/perl
 
+package Fuse::DBI;
+
+use 5.008;
+use strict;
+use warnings;
+
 use POSIX qw(ENOENT EISDIR EINVAL ENOSYS O_RDWR);
 use Fuse;
-
 use DBI;
-use strict;
 
-my $sql_filenames = q{
-	select
-		oid as id,
-		namespace||'/'||name||' ['||oid||']' as filename,
-		length(template) as size,
-		iseditable as writable
-	from template ;
+our $VERSION = '0.01';
+
+=head1 NAME
+
+Fuse::DBI - mount your database as filesystem and use it
+
+=head1 SYNOPSIS
+
+  use Fuse::DBI;
+  Fuse::DBI->run( ... );
+
+See L<run> below for examples how to set parametars.
+
+=head1 DESCRIPTION
+
+This module will use L<Fuse> module, part of C<FUSE (Filesystem in USErspace)>
+available at L<http://sourceforge.net/projects/avf> to mount
+your database as file system.
+
+That will give you posibility to use normal file-system tools (cat, grep, vi)
+to manipulate data in database.
+
+It's actually opposite of Oracle's intention to put everything into database.
+
+
+=head1 METHODS
+
+=cut
+
+=head2 run
+
+Mount your database as filesystem.
+
+  Fuse::DBI->run({
+	filenames => 'select name from filenamefilenames,
+	read => 'sql read',
+	update => 'sql update',
+	dsn => 'DBI:Pg:dbname=webgui',
+	user => 'database_user',
+	password => 'database_password'
+  });
+
+=cut
+
+my $dbh;
+my $sth;
+my $ctime_start;
+
+sub run {
+	my $self = shift
+
+	my $arg = {@_};
+
+	carp "run needs 'dsn' to connect to (e.g. dsn => 'DBI:Pg:dbname=test')" unless ($arg->{'dsn'});
+	carp "run needs 'mount' as mountpoint" unless ($arg->{'mount'});
+
+	foreach (qw(filenames read update)) {
+		carp "run needs '$_' SQL" unless ($arg->{$_});
+	}
+
+	$dbh = DBI->connect($arg->{'dsn'},$arg->{'user'},$arg->{'password'}, { AutoCommit => 0 }) || die $DBI::errstr;
+
+	print "start transaction\n";
+	#$dbh->begin_work || die $dbh->errstr;
+
+	$sth->{filenames} = $dbh->prepare($arg->{'filenames'}) || die $dbh->errstr();
+
+	$sth->{'read'} = $dbh->prepare($arg->{'read'}) || die $dbh->errstr();
+	$sth->{'update'} = $dbh->prepare($arg->{'update'}) || die $dbh->errstr();
+
+	$ctime_start = time();
+
+	read_filenames;
+
+	Fuse::main(
+		mountpoint=>$arg->{'mount'},
+		getattr=>\&e_getattr,
+		getdir=>\&e_getdir,
+		open=>\&e_open,
+		statfs=>\&e_statfs,
+		read=>\&e_read,
+		write=>\&e_write,
+		utime=>\&e_utime,
+		truncate=>\&e_truncate,
+		debug=>0,
+	);
 };
 
-my $sql_read = q{
-	select template
-		from template
-		where oid = ?;
-};
-
-my $sql_update = q{
-	update template
-		set template = ?	
-		where oid = ?;
-};
-
-
-my $connect = "DBI:Pg:dbname=webgui";
-
-my $dbh = DBI->connect($connect,"","", { AutoCommit => 0 }) || die $DBI::errstr;
-
-print "start transaction\n";
-#$dbh->begin_work || die $dbh->errstr;
-
-my $sth_filenames = $dbh->prepare($sql_filenames) || die $dbh->errstr();
-$sth_filenames->execute() || die $sth_filenames->errstr();
-
-my $sth_read = $dbh->prepare($sql_read) || die $dbh->errstr();
-my $sth_update = $dbh->prepare($sql_update) || die $dbh->errstr();
-
-my $ctime_start = time();
-
-my (%files) = (
-	'.' => {
-		type => 0040,
-		mode => 0755,
-	},
-#	a => {
-#		cont => "File 'a'.\n",
-#		type => 0100,
-#		ctime => time()-2000
-#	},
-);
-
+my %files;
 my %dirs;
 
-while (my $row = $sth_filenames->fetchrow_hashref() ) {
-	$files{$row->{'filename'}} = {
-		size => $row->{'size'},
-		mode => $row->{'writable'} ? 0644 : 0444,
-		id => $row->{'id'} || 99,
-	};
+sub read_filenames {
+	# create empty filesystem
+	(%files) = (
+		'.' => {
+			type => 0040,
+			mode => 0755,
+		},
+	#	a => {
+	#		cont => "File 'a'.\n",
+	#		type => 0100,
+	#		ctime => time()-2000
+	#	},
+	);
 
-	my $d;
-	foreach (split(m!/!, $row->{'filename'})) {
-		# first, entry is assumed to be file
-		if ($d) {
-			$files{$d} = {
-					size => $dirs{$d}++,
-					mode => 0755,
-					type => 0040
-			};
-			$files{$d.'/.'} = {
-					mode => 0755,
-					type => 0040
-			};
-			$files{$d.'/..'} = {
-					mode => 0755,
-					type => 0040
-			};
+	# fetch new filename list from database
+	$sth->{'filenames'}->execute() || die $sth->{'filenames'}->errstr();
+
+	# read them in with sesible defaults
+	while (my $row = $sth->{'filenames'}->fetchrow_hashref() ) {
+		$files{$row->{'filename'}} = {
+			size => $row->{'size'},
+			mode => $row->{'writable'} ? 0644 : 0444,
+			id => $row->{'id'} || 99,
+		};
+
+		my $d;
+		foreach (split(m!/!, $row->{'filename'})) {
+			# first, entry is assumed to be file
+			if ($d) {
+				$files{$d} = {
+						size => $dirs{$d}++,
+						mode => 0755,
+						type => 0040
+				};
+				$files{$d.'/.'} = {
+						mode => 0755,
+						type => 0040
+				};
+				$files{$d.'/..'} = {
+						mode => 0755,
+						type => 0040
+				};
+			}
+			$d .= "/" if ($d);
+			$d .= "$_";
 		}
-		$d .= "/" if ($d);
-		$d .= "$_";
 	}
+
+	print "found ",scalar(keys %files)-scalar(keys %dirs)," files, ",scalar(keys %dirs), " dirs\n";
 }
 
-print "found ",scalar(keys %files)-scalar(keys %dirs)," files, ",scalar(keys %dirs), " dirs\n";
 
 sub filename_fixup {
 	my ($file) = shift;
@@ -146,8 +210,8 @@ sub e_open {
 	return -EISDIR() unless exists($files{$file}{id});
 
 	if (!exists($files{$file}{cont})) {
-		$sth_read->execute($files{$file}{id}) || die $sth_read->errstr;
-		$files{$file}{cont} = $sth_read->fetchrow_array;
+		$sth->{'read'}->execute($files{$file}{id}) || die $sth->{'read'}->errstr;
+		$files{$file}{cont} = $sth->{'read'}->fetchrow_array;
 		print "file '$file' content read in cache\n";
 	}
 	print "open '$file' ",length($files{$file}{cont})," bytes\n";
@@ -192,13 +256,13 @@ sub update_db {
 
 	$files{$file}{ctime} = time();
 
-	if (!$sth_update->execute($files{$file}{cont},$files{$file}{id})) {
-		print "update problem: ",$sth_update->errstr;
+	if (!$sth->{'update'}->execute($files{$file}{cont},$files{$file}{id})) {
+		print "update problem: ",$sth->{'update'}->errstr;
 		clear_cont;
 		return 0;
 	} else {
 		if (! $dbh->commit) {
-			print "ERROR: commit problem: ",$sth_update->errstr;
+			print "ERROR: commit problem: ",$sth->{'update'}->errstr;
 			clear_cont;
 			return 0;
 		}
@@ -252,19 +316,30 @@ sub e_utime {
 
 sub e_statfs { return 255, 1, 1, 1, 1, 2 }
 
-# If you run the script directly, it will run fusermount, which will in turn
-# re-run this script.  Hence the funky semantics.
-my ($mountpoint) = "";
-$mountpoint = shift(@ARGV) if @ARGV;
-Fuse::main(
-	mountpoint=>$mountpoint,
-	getattr=>\&e_getattr,
-	getdir=>\&e_getdir,
-	open=>\&e_open,
-	statfs=>\&e_statfs,
-	read=>\&e_read,
-	write=>\&e_write,
-	utime=>\&e_utime,
-	truncate=>\&e_truncate,
-	debug=>0,
-);
+1;
+__END__
+
+=head1 EXPORT
+
+Nothing.
+
+=head1 SEE ALSO
+
+C<FUSE (Filesystem in USErspace)> website
+L<http://sourceforge.net/projects/avf>
+
+=head1 AUTHOR
+
+Dobrica Pavlinusic, E<lt>dpavlin@rot13.orgE<gt>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (C) 2004 by Dobrica Pavlinusic
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.8.4 or,
+at your option, any later version of Perl 5 you may have available.
+
+
+=cut
+
