@@ -524,7 +524,7 @@ C<FUSE (Filesystem in USErspace)> website
 L<http://sourceforge.net/projects/avf>
 
 Example for WebGUI which comes with this distribution in
-directory L<examples/webgui.pl>. It also contains a lot of documentation
+directory C<examples/webgui.pl>. It also contains a lot of documentation
 about design of this module, usage and limitations.
 
 =head1 AUTHOR
