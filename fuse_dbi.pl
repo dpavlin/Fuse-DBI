@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-use POSIX qw(ENOENT EISDIR EINVAL O_RDWR);
+use POSIX qw(ENOENT EISDIR EINVAL ENOSYS O_RDWR);
 use Fuse;
 
 use DBI;
@@ -30,17 +30,16 @@ my $sql_update = q{
 
 my $connect = "DBI:Pg:dbname=webgui";
 
-my $dbh = DBI->connect($connect,"","") || die $DBI::errstr;
+my $dbh = DBI->connect($connect,"","", { AutoCommit => 0 }) || die $DBI::errstr;
 
-print STDERR "$sql_filenames\n";
+print "start transaction\n";
+#$dbh->begin_work || die $dbh->errstr;
 
 my $sth_filenames = $dbh->prepare($sql_filenames) || die $dbh->errstr();
 $sth_filenames->execute() || die $sth_filenames->errstr();
 
 my $sth_read = $dbh->prepare($sql_read) || die $dbh->errstr();
 my $sth_update = $dbh->prepare($sql_update) || die $dbh->errstr();
-
-print "#",join(",",@{ $sth_filenames->{NAME} }),"\n";
 
 my $ctime_start = time();
 
@@ -88,7 +87,7 @@ while (my $row = $sth_filenames->fetchrow_hashref() ) {
 	}
 }
 
-print scalar (keys %dirs), " dirs:",join(" ",keys %dirs),"\n";
+print "found ",scalar(keys %files)-scalar(keys %dirs)," files, ",scalar(keys %dirs), " dirs\n";
 
 sub filename_fixup {
 	my ($file) = shift;
@@ -130,7 +129,6 @@ sub e_getdir {
 		} else {
 			$out{$f}++ if ($f =~ /^[^\/]+$/);
 		}
-		print "f: $_ -> $f\n";
 	}
 	if (! %out) {
 		$out{'no files? bug?'}++;
@@ -138,8 +136,6 @@ sub e_getdir {
 	print scalar keys %out," files found for '$dirname': ",keys %out,"\n";
 	return (keys %out),0;
 }
-
-my $in_transaction = 0;
 
 sub e_open {
 	# VFS sanity check; it keeps all the necessary state, not much to do here.
@@ -149,19 +145,10 @@ sub e_open {
 	return -ENOENT() unless exists($files{$file});
 	return -EISDIR() unless exists($files{$file}{id});
 
-	if (! $in_transaction) {
-		# begin transaction
-		if (! $dbh->begin_work) {
-			print "transaction begin: ",$dbh->errstr;
-			return -ENOENT();
-		}
-	}
-	$in_transaction++;
-	print "files opened: $in_transaction\n";
-
 	if (!exists($files{$file}{cont})) {
 		$sth_read->execute($files{$file}{id}) || die $sth_read->errstr;
 		$files{$file}{cont} = $sth_read->fetchrow_array;
+		print "file '$file' content read in cache\n";
 	}
 	print "open '$file' ",length($files{$file}{cont})," bytes\n";
 	return 0;
@@ -189,10 +176,14 @@ sub e_read {
 }
 
 sub clear_cont {
+	print "transaction rollback\n";
+	$dbh->rollback || die $dbh->errstr;
 	print "invalidate all cached content\n";
 	foreach my $f (keys %files) {
 		delete $files{$f}{cont};
 	}
+	print "begin new transaction\n";
+	$dbh->begin_work || die $dbh->errstr;
 }
 
 
@@ -201,16 +192,12 @@ sub update_db {
 
 	if (!$sth_update->execute($files{$file}{cont},$files{$file}{id})) {
 		print "update problem: ",$sth_update->errstr;
-		$dbh->rollback;
 		clear_cont;
-		$dbh->begin_work;
 		return 0;
 	} else {
-		if ($dbh->commit) {
-			print "commit problem: ",$sth_update->errstr;
-			$dbh->rollback;
+		if (! $dbh->commit) {
+			print "ERROR: commit problem: ",$sth_update->errstr;
 			clear_cont;
-			$dbh->begin_work;
 			return 0;
 		}
 		print "updated '$file' [",$files{$file}{id},"]\n";
@@ -275,5 +262,5 @@ Fuse::main(
 	write=>\&e_write,
 	utime=>\&e_utime,
 	truncate=>\&e_truncate,
-	debug=>1,
+	debug=>0,
 );
