@@ -4,6 +4,8 @@ use strict;
 use blib;
 use Fuse::DBI;
 
+my $template_dir = '/data/WebGUI/cms.rot13.org/uploads/temp/templates';
+
 my $sql_filenames = q{
 	select
 		concat(templateid,name) as id,
@@ -35,6 +37,13 @@ my $mnt = Fuse::DBI->mount({
 	user => 'webgui',
 	password => 'webgui',
 	mount => $mount,
+	invalidate => sub {
+		print STDERR "invalidating content in $template_dir\n";
+		opendir(DIR, $template_dir) || die "can't opendir $template_dir: $!";
+		map { unlink "$template_dir/$_" || warn "can't remove $template_dir/$_: $!" } grep { !/^\./ && -f "$template_dir/$_" } readdir(DIR);
+		closedir DIR;
+	}
+
 });
 
 print "Press enter to exit...";
