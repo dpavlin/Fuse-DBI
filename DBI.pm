@@ -12,7 +12,7 @@ use DBI;
 use Carp;
 use Data::Dumper;
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
 
 # block size for this filesystem
 use constant BLOCK => 1024;
@@ -329,11 +329,13 @@ sub read_filenames {
 
 	# read them in with sesible defaults
 	while (my $row = $sth->{'filenames'}->fetchrow_hashref() ) {
+		$row->{'filename'} ||= 'NULL-'.$row->{'id'};
 		$files{$row->{'filename'}} = {
 			size => $row->{'size'},
 			mode => $row->{'writable'} ? 0644 : 0444,
 			id => $row->{'id'} || 99,
 		};
+
 
 		my $d;
 		foreach (split(m!/!, $row->{'filename'})) {
