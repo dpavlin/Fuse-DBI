@@ -373,7 +373,7 @@ sub e_getattr {
 	$file =~ s,^/,,;
 	$file = '.' unless length($file);
 	return -ENOENT() unless exists($files{$file});
-	my ($size) = $files{$file}{size} || BLOCK;
+	my ($size) = $files{$file}{size} || 0;
 	my ($dev, $ino, $rdev, $blocks, $gid, $uid, $nlink, $blksize) = (0,0,0,int(($size+BLOCK-1)/BLOCK),0,0,1,BLOCK);
 	my ($atime, $ctime, $mtime);
 	$atime = $ctime = $mtime = $files{$file}{ctime} || $ctime_start;
@@ -432,6 +432,7 @@ sub e_open {
 
 	read_content($file,$files{$file}{id}) unless exists($files{$file}{cont});
 
+	$files{$file}{cont} ||= '';
 	print "open '$file' ",length($files{$file}{cont})," bytes\n";
 	return 0;
 }
