@@ -42,11 +42,12 @@ unless (-w $mount) {
 my $sql = {
 	'filenames' => q{
 		select
-			layout_id as id,
-			layout_id||'-'||title||'.html' as filename,
+		        layout_id as id,
+			replace(getpathfromnav(kategorija_id),' > ','/')||'/'||title||'.html' as filename,
 			length(content) as size,
 			true as writable
-		from static3
+		from static3, layout
+		where static3.layout_id = layout.id
 	},
 	'read' => q{
 		select content

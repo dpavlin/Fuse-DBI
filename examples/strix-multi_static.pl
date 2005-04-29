@@ -42,11 +42,14 @@ unless (-w $mount) {
 my $sql = {
 	'filenames' => q{
 		select
-			id as id,
-			id||'-'||title||'.html' as filename,
+			multistatic_id as id,
+			replace(getpathfromnav(multistatic_navigation.kategorija_id)||' > '||getpathfromms(multistatic_navigation.multistatic_id),' > ','/')||'.html' as filename,
+
 			length(content) as size,
 			true as writable
-		from multistatic
+		from multistatic_navigation,multistatic
+		where multistatic.id = multistatic_id and 
+		not multistatic_navigation.redirect;
 	},
 	'read' => q{
 		select content
