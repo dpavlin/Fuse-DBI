@@ -9,7 +9,7 @@ use blib;
 
 eval "use DBD::Pg";
 plan skip_all => "DBD::Pg required for testing" if $@;
-plan tests => 34;
+plan tests => 47;
 
 use_ok('DBI');
 use_ok('Fuse::DBI');
@@ -36,19 +36,21 @@ ok($dbh->do(qq{
 	)
 }), "create table files");
 
-ok(my $sth = $dbh->prepare(qq{
+ok(my $sth_insert = $dbh->prepare(qq{
 	insert into files (name,data) values (?,?)
-}), "prepare");
+}), "prepare insert");
+
+ok(my $sth_select = $dbh->prepare(qq{
+	select data from files where name = ?
+}), "prepare select");
 
 my @files = qw(file dir/file dir/subdir/file);
 my %file_data;
 
 foreach my $file (@files) {
 	$file_data{$file} = ("this is test data on ".localtime()."\n") x length($file);
-	ok($sth->execute($file,$file_data{$file}), "insert $file");
+	ok($sth_insert->execute($file,$file_data{$file}), "insert $file");
 }
-
-ok($dbh->disconnect, "disconnect after insert");
 
 my $sql_filenames = qq{
 	select
@@ -91,7 +93,7 @@ sub test_file {
 
 	return unless (-f $f);
 
-	ok(open(F, $f), "open");
+	ok(open(F, $f), "open read $f");
 	my $tmp = '';
 	while(<F>) {
 		$tmp .= $_;
@@ -105,6 +107,16 @@ sub test_file {
 
 	cmp_ok(length($file_data{$f}), '==', length($tmp), "size");
 	cmp_ok($file_data{$f}, 'eq', $tmp, "content");
+
+	$tmp =~ tr/a-z/A-Z/;
+	$tmp .= $f;
+
+	ok(open(F, "> $mount/$f"), "open write $mount/$f");
+	print F $tmp;
+	ok(close(F), "close");
+
+	ok($sth_select->execute($f), "select $f");
+	cmp_ok($sth_select->fetchrow_array(), 'eq', $tmp, "updated content");
 }
 
 # small delay so that filesystem could mount
@@ -114,3 +126,7 @@ find({ wanted => \&test_file, no_chdir => 1 }, $mount);
 
 ok($mnt->umount,"umount");
 
+undef $sth_select;
+undef $sth_insert;
+
+ok($dbh->disconnect, "disconnect");
