@@ -12,7 +12,7 @@ use DBI;
 use Carp;
 use Data::Dumper;
 
-our $VERSION = '0.08';
+our $VERSION = '0.09_1';
 
 # block size for this filesystem
 use constant BLOCK => 1024;
@@ -300,7 +300,7 @@ sub fuse_module_loaded {
 	}
 }
 
-my %files;
+my $files;
 
 sub read_filenames {
 	my $self = shift;
@@ -308,7 +308,7 @@ sub read_filenames {
 	my $sth = $self->{'sth'} || die "no sth argument";
 
 	# create empty filesystem
-	(%files) = (
+	$files = {
 		'.' => {
 			type => 0040,
 			mode => 0755,
@@ -322,7 +322,7 @@ sub read_filenames {
 	#		type => 0100,
 	#		ctime => time()-2000
 	#	},
-	);
+	};
 
 	# fetch new filename list from database
 	$sth->{'filenames'}->execute() || die $sth->{'filenames'}->errstr();
@@ -330,7 +330,7 @@ sub read_filenames {
 	# read them in with sesible defaults
 	while (my $row = $sth->{'filenames'}->fetchrow_hashref() ) {
 		$row->{'filename'} ||= 'NULL-'.$row->{'id'};
-		$files{$row->{'filename'}} = {
+		$files->{$row->{'filename'}} = {
 			size => $row->{'size'},
 			mode => $row->{'writable'} ? 0644 : 0444,
 			id => $row->{'id'} || 99,
@@ -341,15 +341,15 @@ sub read_filenames {
 		foreach (split(m!/!, $row->{'filename'})) {
 			# first, entry is assumed to be file
 			if ($d) {
-				$files{$d} = {
+				$files->{$d} = {
 						mode => 0755,
 						type => 0040
 				};
-				$files{$d.'/.'} = {
+				$files->{$d.'/.'} = {
 						mode => 0755,
 						type => 0040
 				};
-				$files{$d.'/..'} = {
+				$files->{$d.'/..'} = {
 						mode => 0755,
 						type => 0040
 				};
@@ -359,7 +359,7 @@ sub read_filenames {
 		}
 	}
 
-	print "found ",scalar(keys %files)," files\n";
+	print "found ",scalar(keys %{$files})," files\n";
 }
 
 
@@ -374,13 +374,13 @@ sub e_getattr {
 	my ($file) = filename_fixup(shift);
 	$file =~ s,^/,,;
 	$file = '.' unless length($file);
-	return -ENOENT() unless exists($files{$file});
-	my ($size) = $files{$file}{size} || 0;
+	return -ENOENT() unless exists($files->{$file});
+	my ($size) = $files->{$file}->{size} || 0;
 	my ($dev, $ino, $rdev, $blocks, $gid, $uid, $nlink, $blksize) = (0,0,0,int(($size+BLOCK-1)/BLOCK),0,0,1,BLOCK);
 	my ($atime, $ctime, $mtime);
-	$atime = $ctime = $mtime = $files{$file}{ctime} || $ctime_start;
+	$atime = $ctime = $mtime = $files->{$file}->{ctime} || $ctime_start;
 
-	my ($modes) = (($files{$file}{type} || 0100)<<9) + $files{$file}{mode};
+	my ($modes) = (($files->{$file}->{type} || 0100)<<9) + $files->{$file}->{mode};
 
 	# 2 possible types of return values:
 	#return -ENOENT(); # or any other error you care to
@@ -392,9 +392,9 @@ sub e_getdir {
 	my ($dirname) = shift;
 	$dirname =~ s!^/!!;
 	# return as many text filenames as you like, followed by the retval.
-	print((scalar keys %files)." files total\n");
+	print((scalar keys %{$files})." files total\n");
 	my %out;
-	foreach my $f (sort keys %files) {
+	foreach my $f (sort keys %{$files}) {
 		if ($dirname) {
 			if ($f =~ s/^\Q$dirname\E\///) {
 				$out{$f}++ if ($f =~ /^[^\/]+$/);
@@ -417,10 +417,10 @@ sub read_content {
 	die "read_content needs file and id" unless ($file && $id);
 
 	$sth->{'read'}->execute($id) || die $sth->{'read'}->errstr;
-	$files{$file}{cont} = $sth->{'read'}->fetchrow_array;
+	$files->{$file}->{cont} = $sth->{'read'}->fetchrow_array;
 	# I should modify ctime only if content in database changed
-	#$files{$file}{ctime} = time() unless ($files{$file}{ctime});
-	print "file '$file' content [",length($files{$file}{cont})," bytes] read in cache\n";
+	#$files->{$file}->{ctime} = time() unless ($files->{$file}->{ctime});
+	print "file '$file' content [",length($files->{$file}->{cont})," bytes] read in cache\n";
 }
 
 
@@ -429,13 +429,13 @@ sub e_open {
 	my $file = filename_fixup(shift);
 	my $flags = shift;
 
-	return -ENOENT() unless exists($files{$file});
-	return -EISDIR() unless exists($files{$file}{id});
+	return -ENOENT() unless exists($files->{$file});
+	return -EISDIR() unless exists($files->{$file}->{id});
 
-	read_content($file,$files{$file}{id}) unless exists($files{$file}{cont});
+	read_content($file,$files->{$file}->{id}) unless exists($files->{$file}->{cont});
 
-	$files{$file}{cont} ||= '';
-	print "open '$file' ",length($files{$file}{cont})," bytes\n";
+	$files->{$file}->{cont} ||= '';
+	print "open '$file' ",length($files->{$file}->{cont})," bytes\n";
 	return 0;
 }
 
@@ -446,9 +446,9 @@ sub e_read {
 	my ($file) = filename_fixup(shift);
 	my ($buf_len,$off) = @_;
 
-	return -ENOENT() unless exists($files{$file});
+	return -ENOENT() unless exists($files->{$file});
 
-	my $len = length($files{$file}{cont});
+	my $len = length($files->{$file}->{cont});
 
 	print "read '$file' [$len bytes] offset $off length $buf_len\n";
 
@@ -457,16 +457,16 @@ sub e_read {
 
 	$buf_len = $len-$off if ($len - $off < $buf_len);
 
-	return substr($files{$file}{cont},$off,$buf_len);
+	return substr($files->{$file}->{cont},$off,$buf_len);
 }
 
 sub clear_cont {
 	print "transaction rollback\n";
 	$dbh->rollback || die $dbh->errstr;
 	print "invalidate all cached content\n";
-	foreach my $f (keys %files) {
-		delete $files{$f}{cont};
-		delete $files{$f}{ctime};
+	foreach my $f (keys %{$files}) {
+		delete $files->{$f}->{cont};
+		delete $files->{$f}->{ctime};
 	}
 	print "begin new transaction\n";
 	#$dbh->begin_work || die $dbh->errstr;
@@ -476,11 +476,11 @@ sub clear_cont {
 sub update_db {
 	my $file = shift || die;
 
-	$files{$file}{ctime} = time();
+	$files->{$file}->{ctime} = time();
 
 	my ($cont,$id) = (
-		$files{$file}{cont},
-		$files{$file}{id}
+		$files->{$file}->{cont},
+		$files->{$file}->{id}
 	);
 
 	if (!$sth->{'update'}->execute($cont,$id)) {
@@ -493,7 +493,7 @@ sub update_db {
 			clear_cont;
 			return 0;
 		}
-		print "updated '$file' [",$files{$file}{id},"]\n";
+		print "updated '$file' [",$files->{$file}->{id},"]\n";
 
 		$$fuse_self->{'invalidate'}->() if (ref $$fuse_self->{'invalidate'});
 	}
@@ -504,20 +504,20 @@ sub e_write {
 	my $file = filename_fixup(shift);
 	my ($buffer,$off) = @_;
 
-	return -ENOENT() unless exists($files{$file});
+	return -ENOENT() unless exists($files->{$file});
 
-	my $cont = $files{$file}{cont};
+	my $cont = $files->{$file}->{cont};
 	my $len = length($cont);
 
 	print "write '$file' [$len bytes] offset $off length ",length($buffer),"\n";
 
-	$files{$file}{cont} = "";
+	$files->{$file}->{cont} = "";
 
-	$files{$file}{cont} .= substr($cont,0,$off) if ($off > 0);
-	$files{$file}{cont} .= $buffer;
-	$files{$file}{cont} .= substr($cont,$off+length($buffer),$len-$off-length($buffer)) if ($off+length($buffer) < $len);
+	$files->{$file}->{cont} .= substr($cont,0,$off) if ($off > 0);
+	$files->{$file}->{cont} .= $buffer;
+	$files->{$file}->{cont} .= substr($cont,$off+length($buffer),$len-$off-length($buffer)) if ($off+length($buffer) < $len);
 
-	$files{$file}{size} = length($files{$file}{cont});
+	$files->{$file}->{size} = length($files->{$file}->{cont});
 
 	if (! update_db($file)) {
 		return -ENOSYS();
@@ -532,8 +532,8 @@ sub e_truncate {
 
 	print "truncate to $size\n";
 
-	$files{$file}{cont} = substr($files{$file}{cont},0,$size);
-	$files{$file}{size} = $size;
+	$files->{$file}->{cont} = substr($files->{$file}->{cont},0,$size);
+	$files->{$file}->{size} = $size;
 	return 0
 };
 
@@ -542,11 +542,11 @@ sub e_utime {
 	my ($atime,$mtime,$file) = @_;
 	$file = filename_fixup($file);
 
-	return -ENOENT() unless exists($files{$file});
+	return -ENOENT() unless exists($files->{$file});
 
 	print "utime '$file' $atime $mtime\n";
 
-	$files{$file}{time} = $mtime;
+	$files->{$file}->{time} = $mtime;
 	return 0;
 }
 
@@ -555,9 +555,9 @@ sub e_statfs {
 	my $size = 0;
 	my $inodes = 0;
 
-	foreach my $f (keys %files) {
+	foreach my $f (keys %{$files}) {
 		if ($f !~ /(^|\/)\.\.?$/) {
-			$size += $files{$f}{size} || 0;
+			$size += $files->{$f}->{size} || 0;
 			$inodes++;
 		}
 		print "$inodes: $f [$size]\n";
@@ -580,9 +580,9 @@ sub e_unlink {
 #		print Dumper($fuse_self);
 #		$$fuse_self->{'read_filenames'}->();
 #		return 0;
-	if (exists( $files{$file} )) {
+	if (exists( $files->{$file} )) {
 		print "unlink '$file' will invalidate cache\n";
-		read_content($file,$files{$file}{id});
+		read_content($file,$files->{$file}->{id});
 		return 0;
 	}
 
