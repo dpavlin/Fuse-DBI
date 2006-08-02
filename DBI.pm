@@ -111,6 +111,25 @@ running. Implementation is experimental.
 
 =back
 
+There is also alternative way which can generate C<read> and C<update>
+queries on the fly:
+
+  my $mnt = Fuse::DBI->mount({
+	'filenames' => 'select id,filename,size,writable from files',
+	'read' => sub {
+		my ($path,$file) = @_;
+		return( 'select content from files where id = ?', $file->{row}->{id} );
+	},
+	'update' => sub {
+		my ($path,$file) = @_;
+		return( 'update files set content = ? where id = ?', $file->{row}->{id} );
+	},
+	'dsn' => 'DBI:Pg:dbname=test_db',
+	'user' => 'database_user',
+	'password' => 'database_password',
+	'invalidate' => sub { ... },
+  });
+
 =cut
 
 my $dbh;
@@ -176,14 +195,22 @@ sub mount {
 
 	$sth->{'filenames'} = $dbh->prepare($arg->{'filenames'}) || die $dbh->errstr();
 
-	$sth->{'read'} = $dbh->prepare($arg->{'read'}) || die $dbh->errstr();
-	$sth->{'update'} = $dbh->prepare($arg->{'update'}) || die $dbh->errstr();
-
 
 	$self->{'sth'} = $sth;
 
 	$self->{'read_filenames'} = sub { $self->read_filenames };
 	$self->read_filenames;
+
+	foreach my $op (qw/read update/) {
+		if (ref($arg->{ $op }) ne 'CODE') {
+			$self->{ $op . '_ref' } = sub {
+				my $row = shift;
+				return ($arg->{ $op }, $row->{'id'});
+			}
+		} else {
+			$self->{ $op . '_ref' } = $arg->{ $op };
+		}
+	}
 
 	$fuse_self = \$self;
 
@@ -199,7 +226,7 @@ sub mount {
 		truncate=>\&e_truncate,
 		unlink=>\&e_unlink,
 		rmdir=>\&e_unlink,
-		debug=>0,
+		debug=>1,
 	);
 	
 	exit(0) if ($arg->{'fork'});
@@ -333,7 +360,8 @@ sub read_filenames {
 		$files->{$row->{'filename'}} = {
 			size => $row->{'size'},
 			mode => $row->{'writable'} ? 0644 : 0444,
-			id => $row->{'id'} || 99,
+			id => $row->{'id'} || undef,
+			row => $row,
 		};
 
 
@@ -412,12 +440,18 @@ sub e_getdir {
 }
 
 sub read_content {
-	my ($file,$id) = @_;
+	my $file = shift || die "need file";
 
-	die "read_content needs file and id" unless ($file && $id);
+	warn "file: $file\n", Dumper($fuse_self);
 
-	$sth->{'read'}->execute($id) || die $sth->{'read'}->errstr;
-	$files->{$file}->{cont} = $sth->{'read'}->fetchrow_array;
+	my @args = $$fuse_self->{'read_ref'}->($files->{$file});
+	my $sql = shift @args || die "need SQL for $file";
+
+	$$fuse_self->{'read_sth'}->{$sql} ||= $$fuse_self->{sth}->prepare($sql) || die $dbh->errstr();
+	my $sth = $$fuse_self->{'read_sth'}->{$sql} || die;
+
+	$sth->execute(@args) || die $sth->errstr;
+	$files->{$file}->{cont} = $sth->fetchrow_array;
 	# I should modify ctime only if content in database changed
 	#$files->{$file}->{ctime} = time() unless ($files->{$file}->{ctime});
 	print "file '$file' content [",length($files->{$file}->{cont})," bytes] read in cache\n";
@@ -474,7 +508,7 @@ sub clear_cont {
 
 
 sub update_db {
-	my $file = shift || die;
+	my $file = shift || die "need file";
 
 	$files->{$file}->{ctime} = time();
 
@@ -483,13 +517,20 @@ sub update_db {
 		$files->{$file}->{id}
 	);
 
-	if (!$sth->{'update'}->execute($cont,$id)) {
-		print "update problem: ",$sth->{'update'}->errstr;
+	my @args = $$fuse_self->{'update_ref'}->($files->{$file});
+	my $sql = shift @args || die "need SQL for $file";
+
+	my $sth = $$fuse_self->{'update_sth'}->{$sql}
+		||= $$fuse_self->{sth}->prepare($sql)
+		|| die $dbh->errstr();
+
+	if (!$sth->execute(@args)) {
+		print "update problem: ",$sth->errstr;
 		clear_cont;
 		return 0;
 	} else {
 		if (! $dbh->commit) {
-			print "ERROR: commit problem: ",$sth->{'update'}->errstr;
+			print "ERROR: commit problem: ",$sth->errstr;
 			clear_cont;
 			return 0;
 		}
