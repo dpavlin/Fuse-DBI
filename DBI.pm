@@ -144,6 +144,8 @@ sub fuse_module_loaded;
 # be a problem.
 my $fuse_self;
 
+my $debug = 0;
+
 sub mount {
 	my $class = shift;
 	my $self = {};
@@ -195,8 +197,8 @@ sub mount {
 
 	$sth->{'filenames'} = $dbh->prepare($arg->{'filenames'}) || die $dbh->errstr();
 
-
 	$self->{'sth'} = $sth;
+	$self->{'dbh'} = $dbh;
 
 	$self->{'read_filenames'} = sub { $self->read_filenames };
 	$self->read_filenames;
@@ -212,7 +214,7 @@ sub mount {
 		}
 	}
 
-	$fuse_self = \$self;
+	$fuse_self = $self;
 
 	Fuse::main(
 		mountpoint=>$arg->{'mount'},
@@ -226,7 +228,7 @@ sub mount {
 		truncate=>\&e_truncate,
 		unlink=>\&e_unlink,
 		rmdir=>\&e_unlink,
-		debug=>1,
+		debug=>$debug,
 	);
 	
 	exit(0) if ($arg->{'fork'});
@@ -277,6 +279,7 @@ sub umount {
 
 	if ($self->{'mount'} && $self->is_mounted) {
 		system "( fusermount -u ".$self->{'mount'}." 2>&1 ) >/dev/null";
+		sleep 1;
 		if ($self->is_mounted) {
 			system "sudo umount ".$self->{'mount'} ||
 			return 0;
@@ -288,13 +291,13 @@ sub umount {
 }
 
 $SIG{'INT'} = sub {
-	if ($fuse_self && $$fuse_self->umount) {
+	if ($fuse_self && $fuse_self->can('umount')) {
 		print STDERR "umount called by SIG INT\n";
 	}
 };
 
 $SIG{'QUIT'} = sub {
-	if ($fuse_self && $$fuse_self->umount) {
+	if ($fuse_self && $fuse_self->can('umount')) {
 		print STDERR "umount called by SIG QUIT\n";
 	}
 };
@@ -444,11 +447,11 @@ sub read_content {
 
 	warn "file: $file\n", Dumper($fuse_self);
 
-	my @args = $$fuse_self->{'read_ref'}->($files->{$file});
+	my @args = $fuse_self->{'read_ref'}->($files->{$file});
 	my $sql = shift @args || die "need SQL for $file";
 
-	$$fuse_self->{'read_sth'}->{$sql} ||= $$fuse_self->{sth}->prepare($sql) || die $dbh->errstr();
-	my $sth = $$fuse_self->{'read_sth'}->{$sql} || die;
+	$fuse_self->{'read_sth'}->{$sql} ||= $fuse_self->{dbh}->prepare($sql) || die $dbh->errstr();
+	my $sth = $fuse_self->{'read_sth'}->{$sql} || die;
 
 	$sth->execute(@args) || die $sth->errstr;
 	$files->{$file}->{cont} = $sth->fetchrow_array;
@@ -517,11 +520,16 @@ sub update_db {
 		$files->{$file}->{id}
 	);
 
-	my @args = $$fuse_self->{'update_ref'}->($files->{$file});
+	my @args = $fuse_self->{'update_ref'}->($files->{$file});
+
 	my $sql = shift @args || die "need SQL for $file";
 
-	my $sth = $$fuse_self->{'update_sth'}->{$sql}
-		||= $$fuse_self->{sth}->prepare($sql)
+	unshift @args, $files->{$file}->{cont} if ($#args == 0);
+
+	warn "## SQL: $sql\n# files->{$file} = ", Dumper($files->{$file}), $/ if ($debug);
+
+	my $sth = $fuse_self->{'update_sth'}->{$sql}
+		||= $fuse_self->{dbh}->prepare($sql)
 		|| die $dbh->errstr();
 
 	if (!$sth->execute(@args)) {
@@ -536,7 +544,7 @@ sub update_db {
 		}
 		print "updated '$file' [",$files->{$file}->{id},"]\n";
 
-		$$fuse_self->{'invalidate'}->() if (ref $$fuse_self->{'invalidate'});
+		$fuse_self->{'invalidate'}->() if ($fuse_self->can('invalidate'));
 	}
 	return 1;
 }
@@ -619,7 +627,7 @@ sub e_unlink {
 #	if (exists( $dirs{$file} )) {
 #		print "unlink '$file' will re-read template names\n";
 #		print Dumper($fuse_self);
-#		$$fuse_self->{'read_filenames'}->();
+#		$fuse_self->{'read_filenames'}->();
 #		return 0;
 	if (exists( $files->{$file} )) {
 		print "unlink '$file' will invalidate cache\n";
