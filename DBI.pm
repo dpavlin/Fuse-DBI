@@ -445,7 +445,7 @@ sub e_getdir {
 sub read_content {
 	my $file = shift || die "need file";
 
-	warn "file: $file\n", Dumper($fuse_self);
+	warn "# read_content($file)\n" if ($debug);
 
 	my @args = $fuse_self->{'read_ref'}->($files->{$file});
 	my $sql = shift @args || die "need SQL for $file";
